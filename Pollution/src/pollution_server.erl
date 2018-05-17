@@ -10,13 +10,16 @@
 -author("Gustaw").
 
 %% API
--export([getState/0, start/0, addStation/2, addValue/4, removeValue/3, getOneValue/3, getStationMean/2, getDailyMean/2, getDailyOverLimit/3, stop/0]).
+-export([crash/0, getState/0, start/0, addStation/2, addValue/4, removeValue/3, getOneValue/3, getStationMean/2, getDailyMean/2, getDailyOverLimit/3, stop/0]).
+
+
 
 start() ->
-  register(polServer, spawn(fun() -> init() end)).
+  register(polServer, spawn_link(fun() -> init() end)).
 
 stop() ->
-  polServer ! {request, self(), stop}.
+  polServer ! {request, self(), stop},
+  ok.
 
 init() ->
   loop(pollution:createMonitor()).
@@ -49,8 +52,13 @@ loop(State) ->
       Pid ! {reply, State},
       loop(State);
     {request, Pid, stop}->
-      Pid ! {reply, ok}
+      {reply, ok};
+    {request, Pid, crash} ->
+      10/0
   end.
+
+crash() ->
+  polServer ! {request, self(), crash}.
 
 addStation(Name, {Long, Lat}) ->
   polServer ! {request, self(), addStation, Name, {Long, Lat}},
