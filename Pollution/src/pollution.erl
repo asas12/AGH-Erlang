@@ -19,49 +19,62 @@
 createMonitor() ->
   [].
 
+%returns unable_to_add_station or Monitor
 addStation(Name, {Long, Lat}, Monitor) ->
   case lists:any(fun(Station) -> (Station#station.name == Name) orelse ((Station#station.coordinates#coordinates.longitude == Long) and (Station#station.coordinates#coordinates.latitude == Lat)) end, Monitor) of
-    %true -> erlang:error(badarg);  error czy throw?
-    true -> throw(unable_to_add_Station);
-    _ -> Monitor++[#station{name = Name, coordinates = #coordinates{longitude= Long, latitude = Lat}}]
+    true -> unable_to_add_station;
+    _ ->  Monitor++[#station{name = Name, coordinates = #coordinates{longitude= Long, latitude = Lat}}]
   end.
 
-
+%returns unable_to_find_station or duplicate_measurement or Monitor
 addValue(StationDescriptor, MeasurementDate, MeasurementName, MeasurementValue, Monitor) ->
-  {Stat, TmpMonitor} = getStationFromDescriptor(StationDescriptor, Monitor) ,
-  ML = Stat#station.mList,
-  case ([Measurement || Measurement <- ML, Measurement#measurement.mDate == MeasurementDate, Measurement#measurement.mName == MeasurementName]) of
-    [] -> NewStat = Stat#station{mList = [#measurement{mName = MeasurementName, mDate = MeasurementDate, mValue = MeasurementValue}|ML]},
-          TmpMonitor++[NewStat];
-    _ -> throw(duplicate_measurement)
+  {Stat, TmpMonitor} = getStationFromDescriptor(StationDescriptor, Monitor),
+  case Stat of
+    unable_to_find_station -> unable_to_find_station;
+    _ ->  ML = Stat#station.mList,
+        case ([Measurement || Measurement <- ML, Measurement#measurement.mDate == MeasurementDate, Measurement#measurement.mName == MeasurementName]) of
+          [] -> NewStat = Stat#station{mList = [#measurement{mName = MeasurementName, mDate = MeasurementDate, mValue = MeasurementValue}|ML]}, TmpMonitor++[NewStat];
+          _ -> duplicate_measurement
+        end
   end.
 
+%returns unable_to_find_station or Monitor
 removeValue(StationDescriptor, MeasurementDate, MeasurementName, Monitor) ->
   {Stat, TmpMonitor} = getStationFromDescriptor(StationDescriptor, Monitor) ,
-  ML = Stat#station.mList,
-  NewStat = Stat#station{mList = [Measurement || Measurement <- ML, (Measurement#measurement.mDate /= MeasurementDate) or (Measurement#measurement.mName /= MeasurementName)]},
-  TmpMonitor++[NewStat].
+  case Stat of
+    unable_to_find_station -> unable_to_find_station;
+    _ -> ML = Stat#station.mList,
+        NewStat = Stat#station{mList = [Measurement || Measurement <- ML, (Measurement#measurement.mDate /= MeasurementDate) or (Measurement#measurement.mName /= MeasurementName)]},
+        TmpMonitor++[NewStat]
+  end.
 
 
+%returns unable_to_find_station or no_measurement_matching or monitor
 getOneValue(MeasurementName, MeasurementDate, StationDescriptor, Monitor) ->
-  %%{Stat, TmpMonitor} = getStationFromDescriptor(StationDescriptor, Monitor) ,
-  %%ML = Stat#station.mList,
-  %%NewStat = Stat#station{mList = [Measurement || Measurement <- ML, Measurement#measurement.mDate == MeasurementDate, Measurement#measurement.mName == MeasurementName]},
-  %%hd(NewStat#station.mList)#measurement.mValue.
   {Stat, _Monitor} = getStationFromDescriptor(StationDescriptor, Monitor) ,
-  ML = Stat#station.mList,
-  %%(hd(checkEmpty(lists:filter(fun(Measurement) ->  (Measurement#measurement.mDate == MeasurementDate) and (Measurement#measurement.mName == MeasurementName) end , ML))))#measurement.mValue.
-  (hd(checkEmpty([Measurement || Measurement <- ML, Measurement#measurement.mDate == MeasurementDate, Measurement#measurement.mName == MeasurementName ])))#measurement.mValue.
+  case Stat of
+    unable_to_find_station -> unable_to_find_station;
+    _ ->  ML = Stat#station.mList,
+          Res = ([Measurement || Measurement <- ML, Measurement#measurement.mDate == MeasurementDate, Measurement#measurement.mName == MeasurementName ]),
+          case Res of
+            [] -> no_measurement_matching;
+            _ -> (hd(([Measurement || Measurement <- ML, Measurement#measurement.mDate == MeasurementDate, Measurement#measurement.mName == MeasurementName ])))#measurement.mValue
+          end
+  end.
 
-
+%returns unable_to_find_station or Monitor
 getStationMean(StationDescriptor, MeasurementName, Monitor) ->
   {Stat, _Monitor} = getStationFromDescriptor(StationDescriptor, Monitor),
-  {Sum, No} = lists:foldl(fun(Measurement, {S, N})  when
-    Measurement#measurement.mName == MeasurementName -> {S+Measurement#measurement.mValue, N+1};
-    (_, {S, N}) -> {S, N} end, {0,1}, Stat#station.mList),
+  case Stat of
+    unable_to_find_station -> unable_to_find_station;
+    _ -> {Sum, No} = lists:foldl(fun(Measurement, {S, N})  when
+            Measurement#measurement.mName == MeasurementName -> {S+Measurement#measurement.mValue, N+1};
+            (_, {S, N}) -> {S, N} end, {0,1},
+          Stat#station.mList),
+          Sum/(No-1)
+  end.
 
-  Sum/(No-1).
-
+%returns Monitor
 getDailyMean(MeasurementName, {Day, _Time}, Monitor) ->
   {Sum, No} = lists:foldl(
     fun(Station, {S, N}) ->
@@ -73,7 +86,6 @@ getDailyMean(MeasurementName, {Day, _Time}, Monitor) ->
     {0,1},
     Monitor),
   Sum/(No-1);
-
 getDailyMean(MeasurementName, {_Year, _Month, Day}, Monitor) ->
   {Sum, No} = lists:foldl(
     fun(Station, {S, N}) ->
@@ -85,7 +97,6 @@ getDailyMean(MeasurementName, {_Year, _Month, Day}, Monitor) ->
     {0,1},
     Monitor),
   Sum/(No-1);
-
 getDailyMean(MeasurementName, Day, Monitor) ->
   {Sum, No} = lists:foldl(
     fun(Station, {S, N}) ->
@@ -102,7 +113,6 @@ getDailyMean(MeasurementName, Day, Monitor) ->
 getDailyOverLimit(MeasurementName, {Day, _Time}, Norm, Monitor) ->
   lists:foldl(fun(Station, N) -> summer(Station, N, MeasurementName, Day, Norm) end, 0, Monitor);
 getDailyOverLimit(MeasurementName, Date, Norm, Monitor) ->
-  %%Summer = fun(Station, N) -> case lists:any( fun(Measurement) when  Measurement#measurement.mName == MeasurementName -> Measurement#measurement.mValue > Norm; (_) -> false end, Station#station.mList) of true -> N+1; false -> N end, end.
   lists:foldl(fun(Station, N) -> summer(Station, N, MeasurementName, Date, Norm) end, 0, Monitor).
 
 summer(Station, N, MeasurementName, Day, Norm) ->
@@ -115,18 +125,13 @@ summer(Station, N, MeasurementName, Day, Norm) ->
 %%pomocnicze funkcje
 getStationFromDescriptor({Long, Lat}, Monitor) ->
   Elem = [Station || Station <- Monitor, Station#station.coordinates#coordinates.longitude == Long, Station#station.coordinates#coordinates.latitude == Lat],
-  try checkEmpty(Elem) of
-    _ -> {hd(checkEmpty(Elem)), Monitor -- Elem}
-  catch
-    _ -> throw(unable_to_find_station)
+  case Elem of
+    [] -> {unable_to_find_station, Monitor};
+    _ -> {hd(Elem), Monitor -- Elem}
   end;
 getStationFromDescriptor(StationD , Monitor) ->
   Elem = [Station || Station <- Monitor, Station#station.name == StationD],
-  try checkEmpty(Elem) of
-    _ -> {hd(checkEmpty(Elem)), Monitor -- Elem}
-  catch
-    _ -> throw(unable_to_find_station)
+  case Elem of
+    [] -> {unable_to_find_station, Monitor};
+    _ -> {hd(Elem), Monitor -- Elem}
   end.
-
-checkEmpty([]) -> throw(empty);
-checkEmpty(Arg) -> Arg.
