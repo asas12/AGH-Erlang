@@ -1,3 +1,4 @@
 # jetbrains files
 *.idea/
 *.iml
+out/
